@@ -1,25 +1,34 @@
 # Its own workspace root, so this repository builds on its own.
-#
-# Every module repository carries this and the template did not, which stopped
-# mattering the moment the template stopped sitting beside the estate: nested at
-# template/rust, cargo walked up, found the root workspace and refused to build.
-#
-# It would have bitten a generated repository the same way. A template that does
-# not obey the estate's rules produces repositories that start out breaking
-# them — doc/governance/rust-style.md section 4.
 [workspace]
 
 [package]
-name = "xmip-template-rust"
+name = "xmip-core-secret"
 version = "0.1.0"
 edition = "2024"
 license = "AGPL-3.0-or-later"
-repository = "https://github.com/IlleNilsson/xmip-template-rust"
-description = "Starter template for a Rust Xmip module repository."
+repository = "https://github.com/IlleNilsson/xmip-core-secret"
+description = "The key home: data keys wrapped under a named key-encryption key, AES-256-GCM sealing and the keyed hash, once (ADR-0063)."
 publish = false
 
 [lib]
-path = "src/lib.rs"
+# A host crate: the technologies mount beside this source (ADR-0049).
+path = ".src/lib.rs"
+
+[dependencies]
+# The crypto xmip-core-library-tls already builds, through rustls's default
+# provider: AES-256-GCM, HKDF and HMAC-SHA-256 from one audited library rather
+# than a second one for storage (ADR-0063 clause 2). Its assembler comes
+# prebuilt (prebuilt-nasm, as rustls enables it), so a Windows build needs no
+# NASM.
+aws-lc-rs = { version = "1", features = ["prebuilt-nasm"] }
+# Key material is overwritten when it is dropped, not left for the allocator.
+zeroize = "1"
+
+[features]
+# A key store held in memory, from the capability's `fixture` module, for the
+# tests of what uses a key store. Enabled from dev-dependencies only, so it is
+# never in a production build.
+test-support = []
 
 [lints.rust]
 # forbid, not deny: a module has no business writing unsafe. The one exception

@@ -1,0 +1,9 @@
+[submodule "xmip-core-secret-dpapi"]
+	path = dpapi
+	url = https://github.com/IlleNilsson/xmip-core-secret-dpapi.git
+[submodule "xmip-core-secret-file"]
+	path = file
+	url = https://github.com/IlleNilsson/xmip-core-secret-file.git
+[submodule "xmip-core-secret-keychain"]
+	path = keychain
+	url = https://github.com/IlleNilsson/xmip-core-secret-keychain.git
