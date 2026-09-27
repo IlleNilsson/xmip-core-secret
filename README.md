@@ -23,6 +23,12 @@ over a vault only or PKCS#11 only.
 - **`KekHolder` and `Held`** — a technology that keeps a key-encryption key as
   bytes implements `KekHolder` (read, create, never replace); `Held` makes it a
   `KeyStore`, so the wrapping is here once and no technology carries it.
+- **`KeyDirectory`** — the file rules a store that keeps its keys as files
+  shares: a key is `<directory>/<name>.kek`, a new one is written to a file
+  created for it — never over one already there — and synced, and a failure
+  names the file. `file` and `dpapi` keep their keys through it and add only
+  what is theirs: the modes and ownership `file` checks, the sealing
+  `dpapi` does.
 - **`KekName`** — one to sixty-four letters, digits, `.`, `_`, `-`: safe as a
   file name, a keychain account and a PKCS#11 label alike.
 - **`fixture::Memory`**, behind the `test-support` feature — a holder in memory

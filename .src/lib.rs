@@ -33,12 +33,14 @@ mod error;
 pub mod fixture;
 mod kek_holder;
 mod kek_name;
+mod key_directory;
 mod store;
 
 pub use data_key::DataKey;
 pub use error::SecretError;
 pub use kek_holder::{Held, KekHolder};
 pub use kek_name::KekName;
+pub use key_directory::KeyDirectory;
 pub use store::Store;
 
 /// A key store: wraps and unwraps a data key under a named key-encryption
