@@ -47,7 +47,7 @@ impl<H: KekHolder> Held<H> {
         if let Some(bytes) = self.holder.read(name)? {
             return DataKey::from_bytes(&bytes);
         }
-        let fresh = DataKey::generate()?;
+        let fresh = DataKey::generate();
         match self.holder.create(name, fresh.bytes()) {
             Ok(()) => Ok(fresh),
             // Another process created it between the read and the create:
@@ -108,7 +108,7 @@ mod tests {
     #[test]
     fn a_wrapped_key_unwraps_to_the_same_key() {
         let store = Held::new(Memory::default());
-        let key = DataKey::generate().expect("key");
+        let key = DataKey::generate();
         let wrapped = store.wrap(&name("runtime"), &key).expect("wrapped");
         let back = store.unwrap(&name("runtime"), &wrapped).expect("unwrapped");
         assert_eq!(back.bytes(), key.bytes());
@@ -118,7 +118,7 @@ mod tests {
     #[test]
     fn wrapping_creates_the_key_once_and_reuses_it() {
         let store = Held::new(Memory::default());
-        let key = DataKey::generate().expect("key");
+        let key = DataKey::generate();
         let first = store.wrap(&name("runtime"), &key).expect("wrapped");
         let second = store.wrap(&name("runtime"), &key).expect("wrapped");
         assert!(store.unwrap(&name("runtime"), &first).is_ok());
@@ -139,7 +139,7 @@ mod tests {
     #[test]
     fn a_key_wrapped_under_one_name_does_not_open_under_another() {
         let store = Held::new(Memory::default());
-        let key = DataKey::generate().expect("key");
+        let key = DataKey::generate();
         let wrapped = store.wrap(&name("one"), &key).expect("wrapped");
         store.wrap(&name("two"), &key).expect("creates two");
         assert!(matches!(

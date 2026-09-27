@@ -17,7 +17,9 @@ over a vault only or PKCS#11 only.
   (`derive`), HMAC-SHA-256 for a name that can be looked up without saying
   what it names (`keyed_hash`). Through aws-lc-rs, the crypto
   `xmip-core-library-tls` already builds (rustls's default provider, with
-  `prebuilt-nasm`, so a Windows build needs no NASM).
+  `prebuilt-nasm`, so a Windows build needs no NASM). The key and the nonce
+  are drawn from `xmip-core-library-codec`'s `random`, the operating system's
+  random source every key in the estate comes from.
 - **`KekHolder` and `Held`** — a technology that keeps a key-encryption key as
   bytes implements `KekHolder` (read, create, never replace); `Held` makes it a
   `KeyStore`, so the wrapping is here once and no technology carries it.

@@ -2,7 +2,8 @@
 
 use crate::SecretError;
 use aws_lc_rs::aead::{AES_256_GCM, Aad, LessSafeKey, NONCE_LEN, Nonce, UnboundKey};
-use aws_lc_rs::{hkdf, hmac, rand};
+use aws_lc_rs::{hkdf, hmac};
+use codec::random;
 use std::fmt;
 use zeroize::Zeroizing;
 
@@ -31,15 +32,15 @@ impl hkdf::KeyType for KeyLength {
 }
 
 impl DataKey {
-    /// A fresh key from the operating system's random source.
-    ///
-    /// # Errors
-    ///
-    /// [`SecretError::Store`] when the random source fails.
-    pub fn generate() -> Result<Self, SecretError> {
+    /// A fresh key from the operating system's random source, drawn through
+    /// `codec::random` straight into the bytes that are overwritten on drop.
+    /// It cannot fail: `codec::random` panics where the operating system has
+    /// no random source, as the standard library's own hash keys do.
+    #[must_use]
+    pub fn generate() -> Self {
         let mut bytes = Zeroizing::new([0u8; KEY_LEN]);
-        rand::fill(bytes.as_mut()).map_err(|_| SecretError::store("no random bytes"))?;
-        Ok(Self { bytes })
+        random::fill(bytes.as_mut());
+        Self { bytes }
     }
 
     /// A key from bytes a store kept: exactly thirty-two of them.
@@ -84,10 +85,9 @@ impl DataKey {
     ///
     /// # Errors
     ///
-    /// [`SecretError::Store`] when the random source or the cipher fails.
+    /// [`SecretError::Store`] when the cipher fails.
     pub fn seal(&self, aad: &[u8], plaintext: &[u8]) -> Result<Vec<u8>, SecretError> {
-        let mut nonce = [0u8; NONCE_LEN];
-        rand::fill(&mut nonce).map_err(|_| SecretError::store("no random bytes"))?;
+        let nonce: [u8; NONCE_LEN] = random::array();
         let mut sealed = Vec::with_capacity(NONCE_LEN + plaintext.len() + TAG_LEN);
         sealed.extend_from_slice(&nonce);
         let mut body = plaintext.to_vec();
@@ -159,7 +159,7 @@ mod tests {
 
     #[test]
     fn what_is_sealed_opens_with_the_same_key_and_place() {
-        let key = DataKey::generate().expect("key");
+        let key = DataKey::generate();
         let sealed = key.seal(b"orders/4711", b"payload").expect("sealed");
         assert_eq!(
             key.open(b"orders/4711", &sealed).expect("opened"),
@@ -169,7 +169,7 @@ mod tests {
 
     #[test]
     fn every_seal_takes_a_fresh_nonce() {
-        let key = DataKey::generate().expect("key");
+        let key = DataKey::generate();
         let first = key.seal(b"a", b"same").expect("sealed");
         let second = key.seal(b"a", b"same").expect("sealed");
         assert_ne!(first, second);
@@ -177,7 +177,7 @@ mod tests {
 
     #[test]
     fn an_altered_byte_is_refused() {
-        let key = DataKey::generate().expect("key");
+        let key = DataKey::generate();
         let mut sealed = key.seal(b"a", b"payload").expect("sealed");
         let last = sealed.len() - 1;
         sealed[last] ^= 1;
@@ -189,9 +189,9 @@ mod tests {
 
     #[test]
     fn another_key_or_another_place_is_refused() {
-        let key = DataKey::generate().expect("key");
+        let key = DataKey::generate();
         let sealed = key.seal(b"a", b"payload").expect("sealed");
-        let other = DataKey::generate().expect("key");
+        let other = DataKey::generate();
         assert!(matches!(
             other.open(b"a", &sealed),
             Err(SecretError::Refused { .. })
@@ -208,7 +208,7 @@ mod tests {
 
     #[test]
     fn derived_keys_differ_by_purpose_and_repeat_for_the_same_one() {
-        let key = DataKey::generate().expect("key");
+        let key = DataKey::generate();
         let a = key.derive(b"record").expect("derived");
         let b = key.derive(b"lookup").expect("derived");
         assert_ne!(a.bytes(), b.bytes());
@@ -217,9 +217,9 @@ mod tests {
 
     #[test]
     fn a_keyed_hash_repeats_and_depends_on_the_key() {
-        let key = DataKey::generate().expect("key");
+        let key = DataKey::generate();
         assert_eq!(key.keyed_hash(b"orders"), key.keyed_hash(b"orders"));
-        let other = DataKey::generate().expect("key");
+        let other = DataKey::generate();
         assert_ne!(key.keyed_hash(b"orders"), other.keyed_hash(b"orders"));
     }
 
@@ -229,7 +229,7 @@ mod tests {
             DataKey::from_bytes(&[0; 16]),
             Err(SecretError::Invalid { .. })
         ));
-        let key = DataKey::generate().expect("key");
+        let key = DataKey::generate();
         assert_eq!(format!("{key:?}"), "DataKey(..)");
     }
 }
