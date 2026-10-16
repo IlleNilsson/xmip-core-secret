@@ -1,18 +1,17 @@
 //! A directory of key-encryption keys, one file each: the file rules every
 //! store that keeps its keys as files shares, said once.
 //!
-//! A key named `name` is `<directory>/<name>.kek`. A new key is written to a
-//! file created for it — never over one already there, because a replaced key
-//! is every value it sealed, lost ([`crate::KekHolder::create`]) — and synced
-//! before the store says it is kept. A failure names the file and says what
-//! the operating system said. What a store adds — permissions it sets, bytes
-//! it seals first, checks before it reads — stays the store's.
+//! A key named `name` is `<directory>/<name>.kek`. A new key is a private
+//! file ([`crate::private_file::create`]) — owner-only, synced, and never
+//! over one already there, because a replaced key is every value it sealed,
+//! lost ([`crate::KekHolder::create`]). A failure names the file and says
+//! what the operating system said. What a store adds — bytes it seals first,
+//! checks before it reads — stays the store's.
 
-use std::fs::OpenOptions;
-use std::io::{Error, Write};
+use std::io::Error;
 use std::path::{Path, PathBuf};
 
-use crate::{KekName, SecretError};
+use crate::{KekName, SecretError, private_file};
 
 /// Where a store keeps its key files.
 #[derive(Clone, Debug, Eq, PartialEq)]
@@ -40,28 +39,30 @@ impl KeyDirectory {
         self.directory.join(format!("{name}.kek"))
     }
 
-    /// Keep `bytes` as the key `name` in a file created for it, opened with
-    /// `options` as the store sets them — a mode, say — and synced.
+    /// The directory, created owner-only where it is absent
+    /// ([`private_file::directory`]); one already there keeps what it has,
+    /// and loses what a crash left between writing a key and naming it
+    /// ([`private_file::sweep`]).
+    ///
+    /// # Errors
+    ///
+    /// It could not be created or swept: [`SecretError::Store`], naming it.
+    pub fn create_directory(&self) -> Result<(), SecretError> {
+        private_file::directory(&self.directory)
+            .and_then(|()| private_file::sweep(&self.directory))
+            .map_err(|error| Self::failed(&self.directory, &error))
+    }
+
+    /// Keep `bytes` as the key `name`, a private file created for it
+    /// ([`private_file::create`]).
     ///
     /// # Errors
     ///
     /// The file already exists, or it could not be created, written or
     /// synced: [`SecretError::Store`], naming it.
-    pub fn create_new(
-        &self,
-        name: &KekName,
-        bytes: &[u8],
-        options: &mut OpenOptions,
-    ) -> Result<(), SecretError> {
+    pub fn create(&self, name: &KekName, bytes: &[u8]) -> Result<(), SecretError> {
         let path = self.path(name);
-        let mut file = options
-            .write(true)
-            .create_new(true)
-            .open(&path)
-            .map_err(|error| Self::failed(&path, &error))?;
-        file.write_all(bytes)
-            .and_then(|()| file.sync_all())
-            .map_err(|error| Self::failed(&path, &error))
+        private_file::create(&path, bytes).map_err(|error| Self::failed(&path, &error))
     }
 
     /// What the operating system said about `path`, as the store's failure.
@@ -80,14 +81,13 @@ mod tests {
         let directory =
             std::env::temp_dir().join(format!("xmip-secret-key-directory-{}", std::process::id()));
         let _ = std::fs::remove_dir_all(&directory);
-        std::fs::create_dir_all(&directory).expect("made");
         let keys = KeyDirectory::new(&directory);
+        keys.create_directory().expect("made");
         let name = KekName::new("runtime").expect("a name");
 
         assert_eq!(keys.path(&name), directory.join("runtime.kek"));
-        keys.create_new(&name, &[1; 32], &mut OpenOptions::new())
-            .expect("kept");
-        let again = keys.create_new(&name, &[2; 32], &mut OpenOptions::new());
+        keys.create(&name, &[1; 32]).expect("kept");
+        let again = keys.create(&name, &[2; 32]);
         assert!(matches!(again, Err(SecretError::Store { .. })), "{again:?}");
         assert_eq!(std::fs::read(keys.path(&name)).expect("read"), [1; 32]);
         let _ = std::fs::remove_dir_all(&directory);

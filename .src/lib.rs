@@ -1,5 +1,3 @@
-#![forbid(unsafe_code)]
-
 //! The key home (ADR-0063 clause 4): where Xmip's keys come from.
 //!
 //! What Xmip stores of its own is sealed under a [`DataKey`], and a data key
@@ -24,6 +22,12 @@
 //! cannot open what the old one sealed, and inventing one would turn a lost
 //! key into silently unreadable data. [`SecretError::MissingKek`] names the
 //! key and the store.
+//!
+//! **A key on disk is a private file.** Whatever keeps a key or an identity
+//! as a file writes it through [`private_file`]: owner-only before its
+//! first byte, synced, and switched into place whole. The access list it
+//! sets on Windows is the one unsafe file of this crate,
+//! `.src/private_file/dacl.rs` (ADR-0050, amendment 2026-09-25).
 
 // Each subject in a file of its own, and each reached at one path: the
 // crate's root.
@@ -34,6 +38,7 @@ pub mod fixture;
 mod kek_holder;
 mod kek_name;
 mod key_directory;
+pub mod private_file;
 mod store;
 
 pub use data_key::DataKey;

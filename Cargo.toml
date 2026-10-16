@@ -27,6 +27,19 @@ codec = { package = "xmip-core-library-codec", git = "https://github.com/IlleNil
 # Key material is overwritten when it is dropped, not left for the allocator.
 zeroize = "1"
 
+[target.'cfg(windows)'.dependencies]
+# The access list a private file and its directory carry on Windows: the
+# user this process runs as and SYSTEM, no one else (private_file, called in
+# the one file .src/private_file/dacl.rs). The version secret-dpapi and the
+# runtime already build, so nothing new is compiled.
+windows-sys = { version = "0.61", features = [
+    "Win32_Foundation",
+    "Win32_Security",
+    "Win32_Security_Authorization",
+    "Win32_Storage_FileSystem",
+    "Win32_System_Threading",
+] }
+
 [features]
 # A key store held in memory, from the capability's `fixture` module, for the
 # tests of what uses a key store. Enabled from dev-dependencies only, so it is
@@ -34,10 +47,11 @@ zeroize = "1"
 test-support = []
 
 [lints.rust]
-# forbid, not deny: a module has no business writing unsafe. The one exception
-# in the estate is xmip-core-abi, which holds the extern "C" vtable over
-# include/xmip_module.h and lowers this to deny with a reason at the call site.
-unsafe_code = "forbid"
+# deny, not forbid, because forbid cannot be lowered anywhere: the one file
+# .src/private_file/dacl.rs allows unsafe code with its reason at the top
+# (ADR-0050, amendment 2026-09-25), and nothing else may. test/Unsafe.Test.ps1
+# holds the list.
+unsafe_code = "deny"
 
 [lints.clippy]
 # Warned, never denied. doc/governance/rust-style.md section 3: a function
