@@ -24,7 +24,9 @@
 //!
 //! **What is not secret is kept the same way.** A chain or the anchors a
 //! surface trusts are replaced whole and synced by [`replace_readable`],
-//! readable as their directory lets.
+//! readable as their directory lets; a chain written where a person named a
+//! new file is created whole and synced by [`create_readable`], never over
+//! one already there.
 
 #[cfg(windows)]
 mod dacl;
@@ -165,9 +167,27 @@ enum Access {
 /// [`ErrorKind::AlreadyExists`] where `path` is there; or the directory,
 /// the file or the link fails, and nothing is at `path`.
 pub fn create(path: &Path, bytes: &[u8]) -> Result<()> {
-    let fresh = written(path, bytes, Access::Owner)?;
-    let linked = fs::hard_link(&fresh, path);
-    let _ = fs::remove_file(&fresh);
+    linked(path, &written(path, bytes, Access::Owner)?)
+}
+
+/// `bytes` kept whole at `path`, never over a file already there, as
+/// [`create`] keeps them — written beside it, synced, linked, the directory
+/// synced — but readable as its directory lets: a chain an authority signed,
+/// written where a person named a file that must not be one already.
+///
+/// # Errors
+///
+/// [`ErrorKind::AlreadyExists`] where `path` is there; or the directory,
+/// the file or the link fails, and nothing is at `path`.
+pub fn create_readable(path: &Path, bytes: &[u8]) -> Result<()> {
+    linked(path, &written(path, bytes, Access::Inherited)?)
+}
+
+/// What was written at `fresh` linked at `path`, which a file already there
+/// refuses, then removed; the directory synced.
+fn linked(path: &Path, fresh: &Path) -> Result<()> {
+    let linked = fs::hard_link(fresh, path);
+    let _ = fs::remove_file(fresh);
     linked?;
     synced(parent(path))
 }
@@ -354,6 +374,22 @@ mod tests {
         replace_readable(&path, b"second").expect("replaced");
         assert_eq!(fs::read(&path).expect("read"), b"second");
         let left: Vec<_> = fs::read_dir(&base).expect("listed").collect();
+        assert_eq!(left.len(), 1, "no written file is left beside it");
+        assert_ne!(access(&path), owner(false), "readable as the folder lets");
+        let _ = fs::remove_dir_all(&base);
+    }
+
+    #[test]
+    fn a_readable_file_is_created_whole_and_never_over_one() {
+        let base = place("created-readable");
+        let path = base.join("inner").join("operator.pem");
+        create_readable(&path, b"first").expect("created");
+        assert_eq!(fs::read(&path).expect("read"), b"first");
+        let refused = create_readable(&path, b"second").expect_err("there already");
+        assert_eq!(refused.kind(), ErrorKind::AlreadyExists);
+        assert_eq!(fs::read(&path).expect("read"), b"first");
+        let folder = path.parent().expect("parent");
+        let left: Vec<_> = fs::read_dir(folder).expect("listed").collect();
         assert_eq!(left.len(), 1, "no written file is left beside it");
         assert_ne!(access(&path), owner(false), "readable as the folder lets");
         let _ = fs::remove_dir_all(&base);

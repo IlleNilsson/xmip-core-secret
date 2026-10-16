@@ -38,7 +38,9 @@ over a vault only or PKCS#11 only.
   (`0700`, or the same list inherited by what is made inside); one already
   there keeps what it has. `replace_readable` keeps a file that is not
   secret — a chain, the anchors a surface trusts — whole and synced the same
-  way, readable as its directory lets. A file written and never switched is
+  way, readable as its directory lets, and `create_readable` writes one
+  never over a file already there — the chain a person's `--sign --out`
+  names. A file written and never switched is
   named `.<name>.<16 hex>.new`; `sweep` removes exactly those, and whoever
   opens a folder of private files calls it first. `owner_only` and
   `described` say the Windows list wanted and the one a path has, for tests.
