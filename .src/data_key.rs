@@ -5,6 +5,7 @@ use aws_lc_rs::aead::{AES_256_GCM, Aad, LessSafeKey, NONCE_LEN, Nonce, UnboundKe
 use aws_lc_rs::{hkdf, hmac};
 use codec::random;
 use std::fmt;
+use std::sync::OnceLock;
 use zeroize::Zeroizing;
 
 /// The length of every key here, in bytes: AES-256 and HMAC-SHA-256 alike.
@@ -18,8 +19,15 @@ const TAG_LEN: usize = 16;
 /// It is never written as it is. A [`crate::KeyStore`] wraps it, and the
 /// wrapped bytes are what a store keeps. Its bytes are overwritten when it
 /// is dropped, and `Debug` does not print them.
+///
+/// The cipher and the keyed hash are set up from the bytes once, at first
+/// use, and kept with them: a Storage node seals, opens and hashes under
+/// one key for every record it writes and reads, and set up again each
+/// time they were some sixty a Message (open problem 33, 2026-10-21).
 pub struct DataKey {
     bytes: Zeroizing<[u8; KEY_LEN]>,
+    cipher: OnceLock<LessSafeKey>,
+    hash: OnceLock<hmac::Key>,
 }
 
 /// HKDF's output length, which aws-lc-rs asks for as a type.
@@ -40,7 +48,15 @@ impl DataKey {
     pub fn generate() -> Self {
         let mut bytes = Zeroizing::new([0u8; KEY_LEN]);
         random::fill(bytes.as_mut());
-        Self { bytes }
+        Self::of(bytes)
+    }
+
+    fn of(bytes: Zeroizing<[u8; KEY_LEN]>) -> Self {
+        Self {
+            bytes,
+            cipher: OnceLock::new(),
+            hash: OnceLock::new(),
+        }
     }
 
     /// A key from bytes a store kept: exactly thirty-two of them.
@@ -48,9 +64,7 @@ impl DataKey {
         let bytes: [u8; KEY_LEN] = bytes.try_into().map_err(|_| SecretError::Invalid {
             what: format!("a key of {} bytes, not {KEY_LEN}", bytes.len()),
         })?;
-        Ok(Self {
-            bytes: Zeroizing::new(bytes),
-        })
+        Ok(Self::of(Zeroizing::new(bytes)))
     }
 
     /// The key's bytes, for a store that holds a key-encryption key as
@@ -74,7 +88,7 @@ impl DataKey {
             .expand(&[purpose], KeyLength)
             .and_then(|okm| okm.fill(bytes.as_mut()))
             .map_err(|_| SecretError::store("key derivation failed"))?;
-        Ok(Self { bytes })
+        Ok(Self::of(bytes))
     }
 
     /// `plaintext` sealed by AES-256-GCM under a fresh random nonce, with
@@ -88,17 +102,20 @@ impl DataKey {
     /// [`SecretError::Store`] when the cipher fails.
     pub fn seal(&self, aad: &[u8], plaintext: &[u8]) -> Result<Vec<u8>, SecretError> {
         let nonce: [u8; NONCE_LEN] = random::array();
+        // Sealed where it is kept: the nonce, the text sealed in place
+        // after it, and the tag; one allocation.
         let mut sealed = Vec::with_capacity(NONCE_LEN + plaintext.len() + TAG_LEN);
         sealed.extend_from_slice(&nonce);
-        let mut body = plaintext.to_vec();
-        self.cipher()?
-            .seal_in_place_append_tag(
+        sealed.extend_from_slice(plaintext);
+        let tag = self
+            .cipher()?
+            .seal_in_place_separate_tag(
                 Nonce::assume_unique_for_key(nonce),
                 Aad::from(aad),
-                &mut body,
+                &mut sealed[NONCE_LEN..],
             )
             .map_err(|_| SecretError::store("sealing failed"))?;
-        sealed.extend_from_slice(&body);
+        sealed.extend_from_slice(tag.as_ref());
         Ok(sealed)
     }
 
@@ -118,6 +135,7 @@ impl DataKey {
         let (nonce, body) = sealed.split_at(NONCE_LEN);
         let nonce = Nonce::try_assume_unique_for_key(nonce)
             .map_err(|_| SecretError::store("nonce length"))?;
+        // Opened in place, the tag cut off: one allocation.
         let mut body = body.to_vec();
         let opened = self
             .cipher()?
@@ -126,24 +144,33 @@ impl DataKey {
                 reason: "the authentication tag does not match: altered, another key, \
                          or another place"
                     .to_string(),
-            })?;
-        Ok(opened.to_vec())
+            })?
+            .len();
+        body.truncate(opened);
+        Ok(body)
     }
 
     /// HMAC-SHA-256 of `data` under this key: a name that can be looked up
     /// again and does not say what it names.
     #[must_use]
     pub fn keyed_hash(&self, data: &[u8]) -> [u8; KEY_LEN] {
-        let key = hmac::Key::new(hmac::HMAC_SHA256, self.bytes());
+        let key = self
+            .hash
+            .get_or_init(|| hmac::Key::new(hmac::HMAC_SHA256, self.bytes()));
         let mut out = [0u8; KEY_LEN];
-        out.copy_from_slice(hmac::sign(&key, data).as_ref());
+        out.copy_from_slice(hmac::sign(key, data).as_ref());
         out
     }
 
-    fn cipher(&self) -> Result<LessSafeKey, SecretError> {
-        UnboundKey::new(&AES_256_GCM, self.bytes())
+    /// The cipher, set up at its first use.
+    fn cipher(&self) -> Result<&LessSafeKey, SecretError> {
+        if let Some(cipher) = self.cipher.get() {
+            return Ok(cipher);
+        }
+        let cipher = UnboundKey::new(&AES_256_GCM, self.bytes())
             .map(LessSafeKey::new)
-            .map_err(|_| SecretError::store("AES-256-GCM refused the key"))
+            .map_err(|_| SecretError::store("AES-256-GCM refused the key"))?;
+        Ok(self.cipher.get_or_init(|| cipher))
     }
 }
 

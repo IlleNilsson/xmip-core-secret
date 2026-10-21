@@ -15,7 +15,10 @@ over a vault only or PKCS#11 only.
   rest: AES-256-GCM under a fresh random nonce with the value's place as
   associated data (`seal`, `open`), HKDF-SHA-256 for a key per purpose
   (`derive`), HMAC-SHA-256 for a name that can be looked up without saying
-  what it names (`keyed_hash`). Through aws-lc-rs, the crypto
+  what it names (`keyed_hash`). The cipher and the keyed hash are set up
+  from the key once, at their first use, and kept with it: a Storage node
+  seals, opens and hashes some sixty times a Message under one key, and set
+  them up again each time until 2026-10-21. Through aws-lc-rs, the crypto
   `xmip-core-library-tls` already builds (rustls's default provider, with
   `prebuilt-nasm`, so a Windows build needs no NASM). The key and the nonce
   are drawn from `xmip-core-library-codec`'s `random`, the operating system's
