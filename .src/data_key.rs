@@ -67,6 +67,25 @@ impl DataKey {
         Ok(Self::of(Zeroizing::new(bytes)))
     }
 
+    /// The key's bytes as a primary Storage node hands them to its standby,
+    /// inside Xmip's mutual TLS between the two, so the standby keeps the
+    /// same records under its own key-encryption key
+    /// (`xmip-core-persist`'s `storage::standby`). The one way a key leaves
+    /// its node; overwritten when dropped.
+    #[must_use]
+    pub fn handed(&self) -> Zeroizing<Vec<u8>> {
+        Zeroizing::new(self.bytes.to_vec())
+    }
+
+    /// A key its primary handed ([`DataKey::handed`]).
+    ///
+    /// # Errors
+    ///
+    /// [`SecretError::Invalid`] where `bytes` are not thirty-two.
+    pub fn taken(bytes: &[u8]) -> Result<Self, SecretError> {
+        Self::from_bytes(bytes)
+    }
+
     /// The key's bytes, for a store that holds a key-encryption key as
     /// bytes. Never leaves the crate.
     pub(crate) fn bytes(&self) -> &[u8] {
@@ -192,6 +211,18 @@ mod tests {
             key.open(b"orders/4711", &sealed).expect("opened"),
             b"payload"
         );
+    }
+
+    #[test]
+    fn a_key_handed_and_taken_opens_what_its_giver_sealed_and_nothing_else_is_a_key() {
+        let key = DataKey::generate();
+        let sealed = key.seal(b"orders/4711", b"payload").expect("sealed");
+        let taken = DataKey::taken(&key.handed()).expect("taken");
+        assert_eq!(
+            taken.open(b"orders/4711", &sealed).expect("opened"),
+            b"payload"
+        );
+        assert!(DataKey::taken(&[7; 31]).is_err(), "thirty-one bytes");
     }
 
     #[test]

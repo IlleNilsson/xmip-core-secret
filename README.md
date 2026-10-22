@@ -22,7 +22,11 @@ over a vault only or PKCS#11 only.
   `xmip-core-library-tls` already builds (rustls's default provider, with
   `prebuilt-nasm`, so a Windows build needs no NASM). The key and the nonce
   are drawn from `xmip-core-library-codec`'s `random`, the operating system's
-  random source every key in the estate comes from.
+  random source every key in the estate comes from. `handed` and `taken`
+  are the one way a key leaves its node: a primary Storage node hands each
+  database's key to its standby inside Xmip's mutual TLS, and the standby
+  wraps it under its own key-encryption key (ADR-0063, amendment
+  2026-10-22).
 - **`KekHolder` and `Held`** — a technology that keeps a key-encryption key as
   bytes implements `KekHolder` (read, create, never replace); `Held` makes it a
   `KeyStore`, so the wrapping is here once and no technology carries it.
