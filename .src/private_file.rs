@@ -96,12 +96,49 @@ pub fn replace_readable(path: &Path, bytes: &[u8]) -> Result<()> {
     switched(path, &written(path, bytes, Access::Inherited)?)
 }
 
-/// What was written at `fresh` renamed over `path`, its directory synced.
+/// What was written at `fresh` renamed over `path`, its directory synced; a
+/// switch that fails leaves no `fresh` behind.
+///
+/// On Windows another process may hold either file for a moment just after
+/// it is written — a virus scanner reading it. One holding `path` with
+/// delete sharing, as a scanner does, is no obstacle: where the plain
+/// rename is refused, the standard library renames again with POSIX
+/// semantics (`SetFileInformationByHandle`, `FileRenameInfoEx`,
+/// `FILE_RENAME_FLAG_POSIX_SEMANTICS | FILE_RENAME_FLAG_REPLACE_IF_EXISTS`),
+/// which replaces a file held so. One holding `fresh`, which nothing renames
+/// while it is held, is waited out a few milliseconds at most
+/// ([`HELD_TRIES`]); on Unix a rename is never refused for a reader.
 fn switched(path: &Path, fresh: &Path) -> Result<()> {
-    fs::rename(fresh, path).inspect_err(|_| {
-        let _ = fs::remove_file(fresh);
+    held_out(|| fs::rename(fresh, path)).inspect_err(|_| {
+        let _ = held_out(|| fs::remove_file(fresh));
     })?;
     synced(parent(path))
+}
+
+/// How often a step another process refuses for a moment is tried, a
+/// millisecond apart: a bound of a few milliseconds, never a long wait.
+const HELD_TRIES: u32 = 5;
+
+/// Whether `refused` is another process holding the file: on Windows,
+/// `ERROR_ACCESS_DENIED` or `ERROR_SHARING_VIOLATION`; never on Unix, where
+/// a reader refuses no rename.
+fn held(refused: &Error) -> bool {
+    cfg!(windows) && matches!(refused.raw_os_error(), Some(5 | 32))
+}
+
+/// `step`, tried again a millisecond later while another process holds the
+/// file ([`held`]), at most [`HELD_TRIES`] times; any other failure at once.
+fn held_out(mut step: impl FnMut() -> Result<()>) -> Result<()> {
+    let mut tried = 1;
+    loop {
+        match step() {
+            Err(refused) if held(&refused) && tried < HELD_TRIES => {
+                tried += 1;
+                std::thread::sleep(std::time::Duration::from_millis(1));
+            }
+            done => return done,
+        }
+    }
 }
 
 /// Every file a crash left in `folder` between writing and switching — a
@@ -184,10 +221,12 @@ pub fn create_readable(path: &Path, bytes: &[u8]) -> Result<()> {
 }
 
 /// What was written at `fresh` linked at `path`, which a file already there
-/// refuses, then removed; the directory synced.
+/// refuses, then removed — waited out a few milliseconds where another
+/// process holds it, so nothing is left behind ([`held_out`]); the directory
+/// synced.
 fn linked(path: &Path, fresh: &Path) -> Result<()> {
     let linked = fs::hard_link(fresh, path);
-    let _ = fs::remove_file(fresh);
+    let _ = held_out(|| fs::remove_file(fresh));
     linked?;
     synced(parent(path))
 }
@@ -392,6 +431,74 @@ mod tests {
         let left: Vec<_> = fs::read_dir(folder).expect("listed").collect();
         assert_eq!(left.len(), 1, "no written file is left beside it");
         assert_ne!(access(&path), owner(false), "readable as the folder lets");
+        let _ = fs::remove_dir_all(&base);
+    }
+
+    /// The share mode a scanner reads with: read, write and delete.
+    #[cfg(windows)]
+    const SHARE_ALL: u32 = 0x1 | 0x2 | 0x4;
+
+    #[cfg(windows)]
+    #[test]
+    fn a_file_another_process_holds_as_a_scanner_does_is_replaced_whole() {
+        use std::os::windows::fs::OpenOptionsExt;
+        let base = place("held");
+        let path = base.join("operator.pem");
+        create_readable(&path, b"first").expect("created");
+        let scanner = fs::OpenOptions::new()
+            .read(true)
+            .share_mode(SHARE_ALL)
+            .open(&path)
+            .expect("held");
+        replace_readable(&path, b"second").expect("replaced while it is held");
+        drop(scanner);
+        assert_eq!(fs::read(&path).expect("read"), b"second");
+        assert_eq!(
+            fs::read_dir(&base).expect("listed").count(),
+            1,
+            "nothing beside it"
+        );
+        let _ = fs::remove_dir_all(&base);
+    }
+
+    #[cfg(windows)]
+    #[test]
+    fn a_written_file_held_a_moment_is_waited_out_and_left_nowhere() {
+        use std::os::windows::fs::OpenOptionsExt;
+        let base = place("written-held");
+        let path = base.join("operator.pem");
+        replace_readable(&path, b"first").expect("kept");
+        let fresh = written(&path, b"second", Access::Inherited).expect("written");
+        // Read without delete sharing, a moment, as a scanner may read what
+        // was just written.
+        let holder = fs::OpenOptions::new()
+            .read(true)
+            .share_mode(0x1)
+            .open(&fresh)
+            .expect("held");
+        let letting_go = std::thread::spawn(move || {
+            std::thread::sleep(std::time::Duration::from_millis(2));
+            drop(holder);
+        });
+        switched(&path, &fresh).expect("switched once it is let go");
+        letting_go.join().expect("let go");
+        assert_eq!(fs::read(&path).expect("read"), b"second");
+        assert_eq!(
+            fs::read_dir(&base).expect("listed").count(),
+            1,
+            "nothing beside it"
+        );
+        let _ = fs::remove_dir_all(&base);
+    }
+
+    #[test]
+    fn a_switch_that_fails_leaves_nothing_beside_its_target() {
+        let base = place("refused-switch");
+        let path = base.join("operator.pem");
+        fs::create_dir_all(path.join("in-the-way")).expect("a folder where the file goes");
+        let fresh = written(&path, b"new", Access::Inherited).expect("written");
+        switched(&path, &fresh).expect_err("a folder is in the way");
+        assert!(!fresh.exists(), "the written file is removed");
         let _ = fs::remove_dir_all(&base);
     }
 }

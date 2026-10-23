@@ -41,7 +41,12 @@ over a vault only or PKCS#11 only.
   else, protected from inheritance — then synced, then moved into place:
   `replace` by a rename, `create` by a link that refuses a file already
   there. On Unix the directory is synced after, so the switch survives a
-  crash; Windows journals it. A directory it creates is owner-only too
+  crash; Windows journals it. On Windows a file another process holds for a
+  moment — a virus scanner reading what was just written — is replaced
+  anyway where it is held with delete sharing (the standard library's
+  rename with POSIX semantics), and a written file held so is waited out a
+  millisecond at a time, five times at most; a switch that fails leaves no
+  written file behind (open problem 49, resolved 2026-10-23). A directory it creates is owner-only too
   (`0700`, or the same list inherited by what is made inside); one already
   there keeps what it has. `replace_readable` keeps a file that is not
   secret — a chain, the anchors a surface trusts — whole and synced the same
