@@ -120,10 +120,28 @@ impl DataKey {
     ///
     /// [`SecretError::Store`] when the cipher fails.
     pub fn seal(&self, aad: &[u8], plaintext: &[u8]) -> Result<Vec<u8>, SecretError> {
+        self.seal_after(&[], aad, plaintext)
+    }
+
+    /// As [`DataKey::seal`], after `prefix`: the prefix, then what `seal`
+    /// returns, in one allocation — what a store that marks each value with
+    /// its layout keeps, never copied again to put the mark first.
+    ///
+    /// # Errors
+    ///
+    /// As [`DataKey::seal`].
+    pub fn seal_after(
+        &self,
+        prefix: &[u8],
+        aad: &[u8],
+        plaintext: &[u8],
+    ) -> Result<Vec<u8>, SecretError> {
         let nonce: [u8; NONCE_LEN] = random::array();
-        // Sealed where it is kept: the nonce, the text sealed in place
-        // after it, and the tag; one allocation.
-        let mut sealed = Vec::with_capacity(NONCE_LEN + plaintext.len() + TAG_LEN);
+        // Sealed where it is kept: the prefix, the nonce, the text sealed
+        // in place after it, and the tag; one allocation.
+        let start = prefix.len() + NONCE_LEN;
+        let mut sealed = Vec::with_capacity(start + plaintext.len() + TAG_LEN);
+        sealed.extend_from_slice(prefix);
         sealed.extend_from_slice(&nonce);
         sealed.extend_from_slice(plaintext);
         let tag = self
@@ -131,7 +149,7 @@ impl DataKey {
             .seal_in_place_separate_tag(
                 Nonce::assume_unique_for_key(nonce),
                 Aad::from(aad),
-                &mut sealed[NONCE_LEN..],
+                &mut sealed[start..],
             )
             .map_err(|_| SecretError::store("sealing failed"))?;
         sealed.extend_from_slice(tag.as_ref());
