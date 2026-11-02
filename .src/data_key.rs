@@ -2,13 +2,13 @@
 
 use crate::SecretError;
 use aws_lc_rs::aead::{AES_256_GCM, Aad, LessSafeKey, NONCE_LEN, Nonce, UnboundKey};
-use aws_lc_rs::{hkdf, hmac};
+use aws_lc_rs::hkdf;
 use codec::random;
 use std::fmt;
 use std::sync::OnceLock;
 use zeroize::Zeroizing;
 
-/// The length of every key here, in bytes: AES-256 and HMAC-SHA-256 alike.
+/// The length of every key here, in bytes: AES-256 and keyed BLAKE3 alike.
 pub(crate) const KEY_LEN: usize = 32;
 
 /// The length of the authentication tag AES-256-GCM appends.
@@ -20,14 +20,13 @@ const TAG_LEN: usize = 16;
 /// wrapped bytes are what a store keeps. Its bytes are overwritten when it
 /// is dropped, and `Debug` does not print them.
 ///
-/// The cipher and the keyed hash are set up from the bytes once, at first
-/// use, and kept with them: a Storage node seals, opens and hashes under
-/// one key for every record it writes and reads, and set up again each
-/// time they were some sixty a Message (open problem 33, 2026-10-21).
+/// The cipher is set up from the bytes once, at first use, and kept with
+/// them: a Storage node seals and opens under one key for every record it
+/// writes and reads, and set up again each time it was some sixty a Message
+/// (open problem 33, 2026-10-21). The keyed hash needs no setup.
 pub struct DataKey {
     bytes: Zeroizing<[u8; KEY_LEN]>,
     cipher: OnceLock<LessSafeKey>,
-    hash: OnceLock<hmac::Key>,
 }
 
 /// HKDF's output length, which aws-lc-rs asks for as a type.
@@ -55,7 +54,6 @@ impl DataKey {
         Self {
             bytes,
             cipher: OnceLock::new(),
-            hash: OnceLock::new(),
         }
     }
 
@@ -187,16 +185,12 @@ impl DataKey {
         Ok(body)
     }
 
-    /// HMAC-SHA-256 of `data` under this key: a name that can be looked up
-    /// again and does not say what it names.
+    /// Keyed BLAKE3 of `data` under this key: a name that can be looked up
+    /// again and does not say what it names (ADR-0063, amendment
+    /// 2026-11-02).
     #[must_use]
     pub fn keyed_hash(&self, data: &[u8]) -> [u8; KEY_LEN] {
-        let key = self
-            .hash
-            .get_or_init(|| hmac::Key::new(hmac::HMAC_SHA256, self.bytes()));
-        let mut out = [0u8; KEY_LEN];
-        out.copy_from_slice(hmac::sign(key, data).as_ref());
-        out
+        blake3::keyed_hash(&self.bytes, data).into()
     }
 
     /// The cipher, set up at its first use.

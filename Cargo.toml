@@ -16,11 +16,15 @@ path = ".src/lib.rs"
 
 [dependencies]
 # The crypto xmip-core-library-tls already builds, through rustls's default
-# provider: AES-256-GCM, HKDF and HMAC-SHA-256 from one audited library rather
-# than a second one for storage (ADR-0063 clause 2). Its assembler comes
-# prebuilt (prebuilt-nasm, as rustls enables it), so a Windows build needs no
-# NASM.
+# provider: AES-256-GCM and HKDF from one audited library rather than a
+# second one for storage (ADR-0063 clause 2). Its assembler comes prebuilt
+# (prebuilt-nasm, as rustls enables it), so a Windows build needs no NASM.
 aws-lc-rs = { version = "1", features = ["prebuilt-nasm"] }
+# The keyed hash that names what a store keeps: keyed BLAKE3, a fifth of
+# HMAC-SHA-256's cost on a record's short place, paid some forty times a
+# Message (ADR-0063, amendment 2026-11-02). Pure Rust, so nothing is
+# assembled: a place is one block, where the assembly gains nothing.
+blake3 = { version = "1", default-features = false, features = ["std", "pure"] }
 # The estate's one random source (codec's `random`, the operating system's):
 # a data key and a sealing nonce are drawn there, as every other key is.
 codec = { package = "xmip-core-library-codec", git = "https://github.com/IlleNilsson/xmip-core-library-codec", branch = "main" }

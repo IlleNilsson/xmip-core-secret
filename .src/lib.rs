@@ -9,8 +9,9 @@
 //! hardware module over PKCS#11 or a vault is a further technology of the
 //! same trait, reserved in `architecture.toml` until one is written.
 //!
-//! **The sealing is here, once.** AES-256-GCM, HKDF and HMAC-SHA-256 come
-//! from aws-lc-rs, the crypto `xmip-core-library-tls` already builds, and
+//! **The sealing is here, once.** AES-256-GCM and HKDF come from aws-lc-rs,
+//! the crypto `xmip-core-library-tls` already builds, the keyed hash is
+//! keyed BLAKE3 (ADR-0063, amendment 2026-11-02), and
 //! [`DataKey`] is the one place the estate calls them for data at rest:
 //! `xmip-core-persist` seals its records with it and the technologies that
 //! hold a key-encryption key as bytes ([`Held`]) wrap with it. A technology
