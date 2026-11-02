@@ -1,17 +1,20 @@
 //! The owner-only access a private file and its directory carry on Windows:
 //! a discretionary access control list granting full control to the user
 //! this process runs as and to `SYSTEM`, and to no one else, protected from
-//! what the folder above would pass down.
+//! what the folder above would pass down. And the move that puts a file
+//! created whole in place, never over one already there
+//! ([`moved_unless_there`]), the crate's other call to Windows.
 //!
 //! The one file in this crate that may hold unsafe code (ADR-0050, amendment
-//! 2026-09-25): the access lists of files are a C interface, reached no other
-//! way. Every block says where its pointers come from, how long they live
+//! 2026-09-25): the access lists of files, and a move that never replaces,
+//! are a C interface, reached no other way. Every block says where its pointers come from, how long they live
 //! and who frees what they hand back.
 #![allow(unsafe_code)]
 
 use std::ffi::c_void;
 use std::fs::{File, OpenOptions};
 use std::io::{Error, Result};
+use std::os::windows::ffi::OsStrExt;
 use std::os::windows::fs::OpenOptionsExt;
 use std::os::windows::io::{AsRawHandle, FromRawHandle, OwnedHandle};
 use std::path::Path;
@@ -30,7 +33,7 @@ use windows_sys::Win32::Security::{
     PROTECTED_DACL_SECURITY_INFORMATION, PSECURITY_DESCRIPTOR, TOKEN_QUERY, TOKEN_USER, TokenUser,
 };
 use windows_sys::Win32::Storage::FileSystem::{
-    FILE_FLAG_BACKUP_SEMANTICS, READ_CONTROL, WRITE_DAC,
+    FILE_FLAG_BACKUP_SEMANTICS, MOVEFILE_WRITE_THROUGH, MoveFileExW, READ_CONTROL, WRITE_DAC,
 };
 use windows_sys::Win32::System::Threading::{GetCurrentProcess, OpenProcessToken};
 
@@ -122,6 +125,28 @@ pub fn create(path: &Path) -> Result<File> {
         return Err(failure);
     }
     Ok(file)
+}
+
+/// The file at `from` moved to `to`, never over a file already there:
+/// `MoveFileExW` without `MOVEFILE_REPLACE_EXISTING`, written through. One
+/// name moves, so the file never has two; a second name made by a hard link
+/// and the first removed left Windows refusing the next rename over the
+/// file with `ERROR_ACCESS_DENIED` for up to a second with no handle open
+/// on it (2026-11-02), where a file only ever moved was never refused.
+///
+/// # Errors
+///
+/// [`std::io::ErrorKind::AlreadyExists`] where a file is at `to`; or the
+/// move fails, and `from` is where it was.
+pub fn moved_unless_there(from: &Path, to: &Path) -> Result<()> {
+    let from: Vec<u16> = from.as_os_str().encode_wide().chain([0]).collect();
+    let to: Vec<u16> = to.as_os_str().encode_wide().chain([0]).collect();
+    // SAFETY: both are NUL-terminated wide strings owned by this frame,
+    // alive across the call, which reads them and keeps neither.
+    if unsafe { MoveFileExW(from.as_ptr(), to.as_ptr(), MOVEFILE_WRITE_THROUGH) } == 0 {
+        return Err(Error::last_os_error());
+    }
+    Ok(())
 }
 
 /// Set [`owner_only`]'s list on the directory at `path`, just made and still

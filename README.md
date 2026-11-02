@@ -91,8 +91,9 @@ missing (`market-position.md` section 8) — though that is to be here too.
 
 ## The system call
 
-The Windows access list is set and read through `windows-sys` in
-`.src/private_file/dacl.rs`, the one file of this crate that allows unsafe
+The Windows access list is set and read, and a file created whole moved into
+place never over one already there, through `windows-sys` in
+`.src/private_file/windows.rs`, the one file of this crate that allows unsafe
 code (ADR-0050, amendment 2026-09-25); every block there says where its
 pointers come from, how long they live and who frees them. `Cargo.toml` sets
 `unsafe_code = "deny"`, and `test/Unsafe.Test.ps1` in the estate lists the

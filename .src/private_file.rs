@@ -14,9 +14,10 @@
 //! one already there keeps what it has.
 //!
 //! **Synced, then switched.** The file is synced to the disk before it takes
-//! its place — by a rename for [`replace`], by a link that refuses a file
-//! already there for [`create`] — and on Unix the directory is synced after,
-//! so the switch itself survives a crash. Windows journals the rename.
+//! its place — by a rename for [`replace`], for [`create`] by a link on Unix
+//! and a move on Windows, each refusing a file already there — and on Unix
+//! the directory is synced after, so the switch itself survives a crash.
+//! Windows journals the rename and the move.
 //!
 //! **A crash's leftover is swept.** A file written and never switched has a
 //! name of one exact shape, `.<name>.<16 hex>.new`; whoever opens a folder
@@ -29,14 +30,14 @@
 //! one already there.
 
 #[cfg(windows)]
-mod dacl;
+mod windows;
 
 use std::fs::{self, File};
 use std::io::{Error, ErrorKind, Result, Write};
 use std::path::{Path, PathBuf};
 
 #[cfg(windows)]
-pub use dacl::{described, owner_only};
+pub use windows::{described, owner_only};
 
 /// The directory at `path` and those above it, each created owner-only
 /// where it is absent; one already there is left as it is.
@@ -65,7 +66,7 @@ pub fn directory(path: &Path) -> Result<()> {
             directory(parent)?;
         }
         match fs::create_dir(path) {
-            Ok(()) => dacl::protect_directory(path),
+            Ok(()) => windows::protect_directory(path),
             Err(failure) if failure.kind() == ErrorKind::AlreadyExists => Ok(()),
             Err(failure) => Err(failure),
         }
@@ -220,14 +221,26 @@ pub fn create_readable(path: &Path, bytes: &[u8]) -> Result<()> {
     linked(path, &written(path, bytes, Access::Inherited)?)
 }
 
-/// What was written at `fresh` linked at `path`, which a file already there
-/// refuses, then removed — waited out a few milliseconds where another
-/// process holds it, so nothing is left behind ([`held_out`]); the directory
-/// synced.
+/// What was written at `fresh` put at `path`, which a file already there
+/// refuses; the directory synced. On Unix linked there, then `fresh`
+/// removed. On Windows moved there (`windows::moved_unless_there`), never
+/// linked: a file given a second name and the first removed was refused
+/// the next rename over it for up to a second, so a chain created and then
+/// renewed failed with `Access is denied` (2026-11-02). Either way a step
+/// another process refuses a moment is waited out ([`held_out`]) and
+/// nothing is left behind.
 fn linked(path: &Path, fresh: &Path) -> Result<()> {
-    let linked = fs::hard_link(fresh, path);
-    let _ = held_out(|| fs::remove_file(fresh));
-    linked?;
+    #[cfg(windows)]
+    let placed = held_out(|| windows::moved_unless_there(fresh, path)).inspect_err(|_| {
+        let _ = held_out(|| fs::remove_file(fresh));
+    });
+    #[cfg(not(windows))]
+    let placed = {
+        let linked = fs::hard_link(fresh, path);
+        let _ = held_out(|| fs::remove_file(fresh));
+        linked
+    };
+    placed?;
     synced(parent(path))
 }
 
@@ -279,7 +292,7 @@ fn opened(path: &Path) -> Result<File> {
     }
     #[cfg(windows)]
     {
-        dacl::create(path)
+        windows::create(path)
     }
 }
 
@@ -431,6 +444,10 @@ mod tests {
         let left: Vec<_> = fs::read_dir(folder).expect("listed").collect();
         assert_eq!(left.len(), 1, "no written file is left beside it");
         assert_ne!(access(&path), owner(false), "readable as the folder lets");
+        // A chain created, then renewed at once: on Windows a created file
+        // that had been given a second name was refused this rename.
+        replace_readable(&path, b"renewed").expect("renewed");
+        assert_eq!(fs::read(&path).expect("read"), b"renewed");
         let _ = fs::remove_dir_all(&base);
     }
 
