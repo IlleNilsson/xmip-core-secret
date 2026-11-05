@@ -10,7 +10,7 @@ use std::fmt;
 /// that answers.
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub struct Store {
-    /// The technology, as `architecture.toml` names it: `dpapi`, `file`,
+    /// The technology, as `architecture.xmip` names it: `dpapi`, `file`,
     /// `keychain`.
     pub technology: &'static str,
     /// Where it keeps its keys: a directory, a keychain service name.

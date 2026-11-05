@@ -7,7 +7,7 @@
 //! — DPAPI on Windows, a file only the Service Identity can read on Linux,
 //! the keychain on macOS — each a technology mounted beside this source. A
 //! hardware module over PKCS#11 or a vault is a further technology of the
-//! same trait, reserved in `architecture.toml` until one is written.
+//! same trait, reserved in `architecture.xmip` until one is written.
 //!
 //! **The sealing is here, once.** AES-256-GCM and HKDF come from aws-lc-rs,
 //! the crypto `xmip-core-library-tls` already builds, the keyed hash is

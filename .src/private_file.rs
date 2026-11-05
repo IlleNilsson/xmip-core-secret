@@ -488,17 +488,25 @@ mod tests {
         let fresh = written(&path, b"second", Access::Inherited).expect("written");
         // Read without delete sharing, a moment, as a scanner may read what
         // was just written.
-        let holder = fs::OpenOptions::new()
-            .read(true)
-            .share_mode(0x1)
-            .open(&fresh)
-            .expect("held");
-        let letting_go = std::thread::spawn(move || {
-            std::thread::sleep(std::time::Duration::from_millis(2));
-            drop(holder);
-        });
-        switched(&path, &fresh).expect("switched once it is let go");
-        letting_go.join().expect("let go");
+        let mut holder = Some(
+            fs::OpenOptions::new()
+                .read(true)
+                .share_mode(0x1)
+                .open(&fresh)
+                .expect("held"),
+        );
+        // The holder lets go at the first refusal, not after a sleep on
+        // another thread: a thread scheduled late under load outlasted the
+        // tries, and the test failed for the scheduler (2026-11-04).
+        let mut refused = Vec::new();
+        held_out(|| {
+            fs::rename(&fresh, &path).inspect_err(|failure| {
+                refused.push(held(failure));
+                drop(holder.take());
+            })
+        })
+        .expect("switched once it is let go");
+        assert_eq!(refused, [true], "refused once, as held, then switched");
         assert_eq!(fs::read(&path).expect("read"), b"second");
         assert_eq!(
             fs::read_dir(&base).expect("listed").count(),
