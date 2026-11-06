@@ -149,7 +149,8 @@ fn held_out(mut step: impl FnMut() -> Result<()>) -> Result<()> {
 ///
 /// # Errors
 ///
-/// Where the folder cannot be listed or a leftover cannot be removed.
+/// Where the folder cannot be listed or a leftover cannot be removed; one a
+/// writer still holds open is left to it.
 pub fn sweep(folder: &Path) -> Result<()> {
     let entries = match fs::read_dir(folder) {
         Ok(entries) => entries,
@@ -160,7 +161,14 @@ pub fn sweep(folder: &Path) -> Result<()> {
         let entry = entry?;
         let leftover = entry.file_name().to_str().is_some_and(is_leftover);
         if leftover && entry.file_type()?.is_file() {
-            fs::remove_file(entry.path())?;
+            match fs::remove_file(entry.path()) {
+                // Another sweep took it first, or a writer still holds it
+                // open: then it is being written, not what a crash left.
+                Err(failure) if failure.kind() != ErrorKind::NotFound && !held(&failure) => {
+                    return Err(failure);
+                }
+                _ => {}
+            }
         }
     }
     Ok(())
