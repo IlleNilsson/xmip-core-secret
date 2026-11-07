@@ -100,6 +100,7 @@ impl<H: KekHolder> KeyStore for Held<H> {
 mod tests {
     use super::*;
     use crate::fixture::Memory;
+    use std::assert_matches;
 
     fn name(text: &str) -> KekName {
         KekName::new(text).expect("name")
@@ -129,11 +130,11 @@ mod tests {
     fn a_missing_key_is_said_and_not_created() {
         let store = Held::new(Memory::default());
         let refused = store.unwrap(&name("absent"), &[0; 60]);
-        assert!(matches!(refused, Err(SecretError::MissingKek { .. })));
-        assert!(matches!(
+        assert_matches!(refused, Err(SecretError::MissingKek { .. }));
+        assert_matches!(
             store.unwrap(&name("absent"), &[0; 60]),
             Err(SecretError::MissingKek { .. })
-        ));
+        );
     }
 
     #[test]
@@ -142,9 +143,9 @@ mod tests {
         let key = DataKey::generate();
         let wrapped = store.wrap(&name("one"), &key).expect("wrapped");
         store.wrap(&name("two"), &key).expect("creates two");
-        assert!(matches!(
+        assert_matches!(
             store.unwrap(&name("two"), &wrapped),
             Err(SecretError::Refused { .. })
-        ));
+        );
     }
 }

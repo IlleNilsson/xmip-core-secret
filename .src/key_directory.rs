@@ -75,6 +75,7 @@ impl KeyDirectory {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use std::assert_matches;
 
     #[test]
     fn a_key_is_its_name_dot_kek_and_is_never_written_over() {
@@ -88,7 +89,7 @@ mod tests {
         assert_eq!(keys.path(&name), directory.join("runtime.kek"));
         keys.create(&name, &[1; 32]).expect("kept");
         let again = keys.create(&name, &[2; 32]);
-        assert!(matches!(again, Err(SecretError::Store { .. })), "{again:?}");
+        assert_matches!(again, Err(SecretError::Store { .. }), "{again:?}");
         assert_eq!(std::fs::read(keys.path(&name)).expect("read"), [1; 32]);
         let _ = std::fs::remove_dir_all(&directory);
     }

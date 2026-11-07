@@ -49,26 +49,26 @@ pub fn directory(path: &Path) -> Result<()> {
     if path.is_dir() {
         return Ok(());
     }
-    #[cfg(unix)]
-    {
-        use std::os::unix::fs::DirBuilderExt;
-        fs::DirBuilder::new()
-            .recursive(true)
-            .mode(0o700)
-            .create(path)
-    }
-    #[cfg(windows)]
-    {
-        if let Some(parent) = path
-            .parent()
-            .filter(|parent| !parent.as_os_str().is_empty())
-        {
-            directory(parent)?;
-        }
-        match fs::create_dir(path) {
-            Ok(()) => windows::protect_directory(path),
-            Err(failure) if failure.kind() == ErrorKind::AlreadyExists => Ok(()),
-            Err(failure) => Err(failure),
+    cfg_select! {
+        unix => {{
+            use std::os::unix::fs::DirBuilderExt;
+            fs::DirBuilder::new()
+                .recursive(true)
+                .mode(0o700)
+                .create(path)
+        }}
+        windows => {
+            if let Some(parent) = path
+                .parent()
+                .filter(|parent| !parent.as_os_str().is_empty())
+            {
+                directory(parent)?;
+            }
+            match fs::create_dir(path) {
+                Ok(()) => windows::protect_directory(path),
+                Err(failure) if failure.kind() == ErrorKind::AlreadyExists => Ok(()),
+                Err(failure) => Err(failure),
+            }
         }
     }
 }
@@ -235,15 +235,15 @@ pub fn create_readable(path: &Path, bytes: &[u8]) -> Result<()> {
 /// another process refuses a moment is waited out ([`held_out`]) and
 /// nothing is left behind.
 fn linked(path: &Path, fresh: &Path) -> Result<()> {
-    #[cfg(windows)]
-    let placed = held_out(|| windows::moved_unless_there(fresh, path)).inspect_err(|_| {
-        let _ = held_out(|| fs::remove_file(fresh));
-    });
-    #[cfg(not(windows))]
-    let placed = {
-        let linked = fs::hard_link(fresh, path);
-        let _ = held_out(|| fs::remove_file(fresh));
-        linked
+    let placed = cfg_select! {
+        windows => held_out(|| windows::moved_unless_there(fresh, path)).inspect_err(|_| {
+            let _ = held_out(|| fs::remove_file(fresh));
+        }),
+        _ => {{
+            let linked = fs::hard_link(fresh, path);
+            let _ = held_out(|| fs::remove_file(fresh));
+            linked
+        }}
     };
     placed?;
     synced(parent(path))
@@ -286,18 +286,16 @@ fn written(path: &Path, bytes: &[u8], access: Access) -> Result<PathBuf> {
 
 /// A new file at `path`, owner-only as it is created.
 fn opened(path: &Path) -> Result<File> {
-    #[cfg(unix)]
-    {
-        use std::os::unix::fs::OpenOptionsExt;
-        fs::OpenOptions::new()
-            .write(true)
-            .create_new(true)
-            .mode(0o600)
-            .open(path)
-    }
-    #[cfg(windows)]
-    {
-        windows::create(path)
+    cfg_select! {
+        unix => {
+            use std::os::unix::fs::OpenOptionsExt;
+            fs::OpenOptions::new()
+                .write(true)
+                .create_new(true)
+                .mode(0o600)
+                .open(path)
+        }
+        windows => windows::create(path),
     }
 }
 
@@ -315,14 +313,12 @@ fn parent(path: &Path) -> &Path {
 ///
 /// Where the directory cannot be opened or synced.
 pub fn synced(path: &Path) -> Result<()> {
-    #[cfg(unix)]
-    {
-        File::open(path)?.sync_all()
-    }
-    #[cfg(windows)]
-    {
-        let _ = path;
-        Ok(())
+    cfg_select! {
+        unix => File::open(path)?.sync_all(),
+        windows => {
+            let _ = path;
+            Ok(())
+        }
     }
 }
 
@@ -339,25 +335,19 @@ mod tests {
 
     /// The access `path` has, as the platform says it.
     fn access(path: &Path) -> String {
-        #[cfg(unix)]
-        {
-            use std::os::unix::fs::MetadataExt;
-            format!("{:o}", fs::metadata(path).expect("metadata").mode() & 0o777)
-        }
-        #[cfg(windows)]
-        {
-            described(path).expect("described")
+        cfg_select! {
+            unix => {
+                use std::os::unix::fs::MetadataExt;
+                format!("{:o}", fs::metadata(path).expect("metadata").mode() & 0o777)
+            }
+            windows => described(path).expect("described"),
         }
     }
 
     fn owner(directory: bool) -> String {
-        #[cfg(unix)]
-        {
-            (if directory { "700" } else { "600" }).to_string()
-        }
-        #[cfg(windows)]
-        {
-            owner_only(directory).expect("owner only")
+        cfg_select! {
+            unix => (if directory { "700" } else { "600" }).to_string(),
+            windows => owner_only(directory).expect("owner only"),
         }
     }
 

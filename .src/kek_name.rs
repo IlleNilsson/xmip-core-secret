@@ -55,6 +55,7 @@ impl fmt::Display for KekName {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use std::assert_matches;
 
     #[test]
     fn a_plain_name_is_taken() {
@@ -67,8 +68,9 @@ mod tests {
     #[test]
     fn a_name_that_is_not_safe_everywhere_is_refused() {
         for name in ["", ".hidden", "a/b", "a b", "..", &"k".repeat(65)] {
-            assert!(
-                matches!(KekName::new(name), Err(SecretError::Invalid { .. })),
+            assert_matches!(
+                KekName::new(name),
+                Err(SecretError::Invalid { .. }),
                 "{name:?} should be refused"
             );
         }

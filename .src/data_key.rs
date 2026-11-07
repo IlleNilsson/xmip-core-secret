@@ -214,6 +214,7 @@ impl fmt::Debug for DataKey {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use std::assert_matches;
 
     #[test]
     fn what_is_sealed_opens_with_the_same_key_and_place() {
@@ -251,10 +252,7 @@ mod tests {
         let mut sealed = key.seal(b"a", b"payload").expect("sealed");
         let last = sealed.len() - 1;
         sealed[last] ^= 1;
-        assert!(matches!(
-            key.open(b"a", &sealed),
-            Err(SecretError::Refused { .. })
-        ));
+        assert_matches!(key.open(b"a", &sealed), Err(SecretError::Refused { .. }));
     }
 
     #[test]
@@ -262,18 +260,12 @@ mod tests {
         let key = DataKey::generate();
         let sealed = key.seal(b"a", b"payload").expect("sealed");
         let other = DataKey::generate();
-        assert!(matches!(
-            other.open(b"a", &sealed),
-            Err(SecretError::Refused { .. })
-        ));
-        assert!(matches!(
-            key.open(b"b", &sealed),
-            Err(SecretError::Refused { .. })
-        ));
-        assert!(matches!(
+        assert_matches!(other.open(b"a", &sealed), Err(SecretError::Refused { .. }));
+        assert_matches!(key.open(b"b", &sealed), Err(SecretError::Refused { .. }));
+        assert_matches!(
             key.open(b"a", &sealed[..10]),
             Err(SecretError::Refused { .. })
-        ));
+        );
     }
 
     #[test]
@@ -295,10 +287,10 @@ mod tests {
 
     #[test]
     fn a_key_of_the_wrong_length_is_refused_and_debug_hides_the_bytes() {
-        assert!(matches!(
+        assert_matches!(
             DataKey::from_bytes(&[0; 16]),
             Err(SecretError::Invalid { .. })
-        ));
+        );
         let key = DataKey::generate();
         assert_eq!(format!("{key:?}"), "DataKey(..)");
     }
