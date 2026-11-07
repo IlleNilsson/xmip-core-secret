@@ -7,8 +7,9 @@
 //!
 //! The one file in this crate that may hold unsafe code (ADR-0050, amendment
 //! 2026-09-25): the access lists of files, and a move that never replaces,
-//! are a C interface, reached no other way. Every block says where its pointers come from, how long they live
-//! and who frees what they hand back.
+//! are a C interface, reached no other way. Every block says where its
+//! pointers come from, how long they live and who frees what they hand
+//! back.
 #![allow(unsafe_code)]
 
 use std::ffi::c_void;
@@ -139,8 +140,7 @@ pub fn create(path: &Path) -> Result<File> {
 /// [`std::io::ErrorKind::AlreadyExists`] where a file is at `to`; or the
 /// move fails, and `from` is where it was.
 pub fn moved_unless_there(from: &Path, to: &Path) -> Result<()> {
-    let from: Vec<u16> = from.as_os_str().encode_wide().chain([0]).collect();
-    let to: Vec<u16> = to.as_os_str().encode_wide().chain([0]).collect();
+    let (from, to) = (wide_path(from)?, wide_path(to)?);
     // SAFETY: both are NUL-terminated wide strings owned by this frame,
     // alive across the call, which reads them and keeps neither.
     if unsafe { MoveFileExW(from.as_ptr(), to.as_ptr(), MOVEFILE_WRITE_THROUGH) } == 0 {
@@ -165,10 +165,7 @@ pub fn protect_directory(path: &Path) -> Result<()> {
 
 /// Set [`owner_only`]'s list on `file`, opened with `WRITE_DAC`.
 fn protect(file: &File, directory: bool) -> Result<()> {
-    let sddl: Vec<u16> = owner_only(directory)?
-        .encode_utf16()
-        .chain(Some(0))
-        .collect();
+    let sddl = codec::wide::encode(&owner_only(directory)?).map_err(Error::other)?;
     let mut descriptor: PSECURITY_DESCRIPTOR = ptr::null_mut();
     // SAFETY: `sddl` is a null-terminated UTF-16 string alive for the call.
     // `descriptor` is a local Windows fills with a LocalAlloc'd descriptor,
@@ -272,7 +269,8 @@ fn succeeded(status: WIN32_ERROR) -> Result<()> {
     Err(Error::from_raw_os_error(status.cast_signed()))
 }
 
-/// The null-terminated UTF-16 string at `text`.
+/// The null-terminated UTF-16 string at `text`, measured here and read by
+/// codec's one reading of a wide string.
 fn wide(text: *const u16) -> String {
     let mut length = 0;
     // SAFETY: `text` is a null-terminated string Windows allocated, alive
@@ -281,8 +279,17 @@ fn wide(text: *const u16) -> String {
         while *text.add(length) != 0 {
             length += 1;
         }
-        String::from_utf16_lossy(std::slice::from_raw_parts(text, length))
+        codec::wide::decode_lossy(std::slice::from_raw_parts(text, length))
     }
+}
+
+/// `path` as the Windows calls take it, ended by its NUL.
+///
+/// # Errors
+///
+/// A NUL inside the path, where Windows would read it cut short.
+fn wide_path(path: &Path) -> Result<codec::wide::Wide> {
+    codec::wide::terminated(path.as_os_str().encode_wide()).map_err(Error::other)
 }
 
 /// Memory Windows allocated with `LocalAlloc`, freed once when dropped.

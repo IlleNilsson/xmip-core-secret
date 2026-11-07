@@ -180,10 +180,7 @@ const NONCE_DIGITS: usize = 16;
 /// Whether `name` is the shape [`written`] gives: a dot, a name, a dot,
 /// sixteen lower-case hex digits, `.new`.
 fn is_leftover(name: &str) -> bool {
-    let Some(inner) = name
-        .strip_prefix('.')
-        .and_then(|rest| rest.strip_suffix(".new"))
-    else {
+    let Some(inner) = name.strip_circumfix('.', ".new") else {
         return false;
     };
     let Some((kept, nonce)) = inner.rsplit_once('.') else {
