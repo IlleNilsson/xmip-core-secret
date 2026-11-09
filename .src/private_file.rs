@@ -35,6 +35,7 @@ mod windows;
 use std::fs::{self, File};
 use std::io::{Error, ErrorKind, Result, Write};
 use std::path::{Path, PathBuf};
+use xcore::spent::on_sync;
 
 #[cfg(windows)]
 pub use windows::{described, owner_only};
@@ -276,7 +277,9 @@ fn written(path: &Path, bytes: &[u8], access: Access) -> Result<PathBuf> {
                 .open(&fresh)?
         }
     };
-    let kept = file.write_all(bytes).and_then(|()| file.sync_all());
+    let kept = file
+        .write_all(bytes)
+        .and_then(|()| on_sync(|| file.sync_all()));
     drop(file);
     kept.inspect_err(|_| {
         let _ = fs::remove_file(&fresh);
@@ -314,7 +317,10 @@ fn parent(path: &Path) -> &Path {
 /// Where the directory cannot be opened or synced.
 pub fn synced(path: &Path) -> Result<()> {
     cfg_select! {
-        unix => File::open(path)?.sync_all(),
+        unix => {
+            let directory = File::open(path)?;
+            on_sync(|| directory.sync_all())
+        }
         windows => {
             let _ = path;
             Ok(())

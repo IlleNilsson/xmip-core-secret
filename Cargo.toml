@@ -29,6 +29,10 @@ blake3 = { version = "1", default-features = false, features = ["std", "pure"] }
 # a data key and a sealing nonce are drawn there, as every other key is; and
 # the wide string a private file's paths and descriptor cross to Windows as.
 codec ={ package = "xmip-core-library-codec", git = "https://github.com/IlleNilsson/xmip-core-library-codec", branch = "main" }
+# Every sync of a private file and its directory waited through the one
+# helper that counts a wait for the disk as the disk's time (`spent::on_sync`;
+# ADR-0018, amendment 2026-11-09).
+xcore = { package = "xmip-core", git = "https://github.com/IlleNilsson/xmip-core", branch = "main" }
 # Key material is overwritten when it is dropped, not left for the allocator.
 zeroize = "1"
 
