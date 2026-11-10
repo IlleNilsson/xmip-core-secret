@@ -77,7 +77,7 @@ Mounted beside `.src` (ADR-0049), one per platform:
 | `file` | Linux, every Unix | a file `0600` in a directory `0700`, owned by the Service Identity; refused when either is wider |
 | `keychain` | macOS | a generic password item of the Service Identity's keychain |
 
-Reserved in `architecture.xmip`, not built: `pkcs11`, `vault`,
+Reserved in `architecture.toml`, not built: `pkcs11`, `vault`,
 `azure-key-vault`, `aws-kms` — a key that never leaves its module implements
 `KeyStore` itself and seals inside the module — and `keyring`, the Linux
 kernel keyring, which holds a key only until the machine restarts and so
