@@ -331,12 +331,13 @@ pub fn synced(path: &Path) -> Result<()> {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use file::temporary::Folder;
 
-    fn place(test: &str) -> PathBuf {
-        let path =
-            std::env::temp_dir().join(format!("xmip-secret-private-{test}-{}", std::process::id()));
-        let _ = fs::remove_dir_all(&path);
-        path
+    /// A folder of the test's own, and a place in it not made yet.
+    fn place(test: &str) -> (Folder, PathBuf) {
+        let folder = Folder::new(&format!("secret-private-{test}"));
+        let place = folder.join("place");
+        (folder, place)
     }
 
     /// The access `path` has, as the platform says it.
@@ -359,7 +360,7 @@ mod tests {
 
     #[test]
     fn a_private_file_and_its_directory_are_the_owners_alone() {
-        let base = place("access");
+        let (_folder, base) = place("access");
         let path = base.join("inner").join("key.pem");
         replace(&path, b"secret").expect("kept");
         assert_eq!(fs::read(&path).expect("read"), b"secret");
@@ -368,12 +369,11 @@ mod tests {
         assert_eq!(access(&base), owner(true));
         create(&base.join("account.key"), b"made").expect("created");
         assert_eq!(access(&base.join("account.key")), owner(false));
-        let _ = fs::remove_dir_all(&base);
     }
 
     #[test]
     fn a_file_is_replaced_whole_and_created_never_over_one() {
-        let base = place("replace");
+        let (_folder, base) = place("replace");
         let path = base.join("key.pem");
         replace(&path, b"first").expect("kept");
         replace(&path, b"second").expect("replaced");
@@ -383,12 +383,11 @@ mod tests {
         assert_eq!(fs::read(&path).expect("read"), b"second");
         let left: Vec<_> = fs::read_dir(&base).expect("listed").collect();
         assert_eq!(left.len(), 1, "no written file is left beside it");
-        let _ = fs::remove_dir_all(&base);
     }
 
     #[test]
     fn a_crash_after_the_bytes_are_written_leaves_the_file_as_it_was() {
-        let base = place("crash");
+        let (_folder, base) = place("crash");
         let path = base.join("key.pem");
         replace(&path, b"old").expect("kept");
         let fresh = written(&path, b"new", Access::Owner).expect("written");
@@ -416,12 +415,11 @@ mod tests {
         }
         assert_eq!(fs::read(&path).expect("read"), b"newer");
         sweep(&base.join("absent")).expect("a missing folder holds none");
-        let _ = fs::remove_dir_all(&base);
     }
 
     #[test]
     fn a_readable_file_is_replaced_whole_and_synced() {
-        let base = place("readable");
+        let (_folder, base) = place("readable");
         let path = base.join("chain.pem");
         replace_readable(&path, b"first").expect("kept");
         replace_readable(&path, b"second").expect("replaced");
@@ -429,12 +427,11 @@ mod tests {
         let left: Vec<_> = fs::read_dir(&base).expect("listed").collect();
         assert_eq!(left.len(), 1, "no written file is left beside it");
         assert_ne!(access(&path), owner(false), "readable as the folder lets");
-        let _ = fs::remove_dir_all(&base);
     }
 
     #[test]
     fn a_readable_file_is_created_whole_and_never_over_one() {
-        let base = place("created-readable");
+        let (_folder, base) = place("created-readable");
         let path = base.join("inner").join("operator.pem");
         create_readable(&path, b"first").expect("created");
         assert_eq!(fs::read(&path).expect("read"), b"first");
@@ -449,7 +446,6 @@ mod tests {
         // that had been given a second name was refused this rename.
         replace_readable(&path, b"renewed").expect("renewed");
         assert_eq!(fs::read(&path).expect("read"), b"renewed");
-        let _ = fs::remove_dir_all(&base);
     }
 
     /// The share mode a scanner reads with: read, write and delete.
@@ -460,7 +456,7 @@ mod tests {
     #[test]
     fn a_file_another_process_holds_as_a_scanner_does_is_replaced_whole() {
         use std::os::windows::fs::OpenOptionsExt;
-        let base = place("held");
+        let (_folder, base) = place("held");
         let path = base.join("operator.pem");
         create_readable(&path, b"first").expect("created");
         let scanner = fs::OpenOptions::new()
@@ -476,14 +472,13 @@ mod tests {
             1,
             "nothing beside it"
         );
-        let _ = fs::remove_dir_all(&base);
     }
 
     #[cfg(windows)]
     #[test]
     fn a_written_file_held_a_moment_is_waited_out_and_left_nowhere() {
         use std::os::windows::fs::OpenOptionsExt;
-        let base = place("written-held");
+        let (_folder, base) = place("written-held");
         let path = base.join("operator.pem");
         replace_readable(&path, b"first").expect("kept");
         let fresh = written(&path, b"second", Access::Inherited).expect("written");
@@ -514,17 +509,15 @@ mod tests {
             1,
             "nothing beside it"
         );
-        let _ = fs::remove_dir_all(&base);
     }
 
     #[test]
     fn a_switch_that_fails_leaves_nothing_beside_its_target() {
-        let base = place("refused-switch");
+        let (_folder, base) = place("refused-switch");
         let path = base.join("operator.pem");
         fs::create_dir_all(path.join("in-the-way")).expect("a folder where the file goes");
         let fresh = written(&path, b"new", Access::Inherited).expect("written");
         switched(&path, &fresh).expect_err("a folder is in the way");
         assert!(!fresh.exists(), "the written file is removed");
-        let _ = fs::remove_dir_all(&base);
     }
 }

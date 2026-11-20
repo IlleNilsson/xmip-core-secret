@@ -79,9 +79,8 @@ mod tests {
 
     #[test]
     fn a_key_is_its_name_dot_kek_and_is_never_written_over() {
-        let directory =
-            std::env::temp_dir().join(format!("xmip-secret-key-directory-{}", std::process::id()));
-        let _ = std::fs::remove_dir_all(&directory);
+        let base = file::temporary::Folder::new("secret-key-directory");
+        let directory = base.join("keys");
         let keys = KeyDirectory::new(&directory);
         keys.create_directory().expect("made");
         let name = KekName::new("runtime").expect("a name");
@@ -91,6 +90,5 @@ mod tests {
         let again = keys.create(&name, &[2; 32]);
         assert_matches!(again, Err(SecretError::Store { .. }), "{again:?}");
         assert_eq!(std::fs::read(keys.path(&name)).expect("read"), [1; 32]);
-        let _ = std::fs::remove_dir_all(&directory);
     }
 }
