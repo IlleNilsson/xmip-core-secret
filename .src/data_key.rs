@@ -134,24 +134,54 @@ impl DataKey {
         aad: &[u8],
         plaintext: &[u8],
     ) -> Result<Vec<u8>, SecretError> {
-        let nonce: [u8; NONCE_LEN] = random::array();
-        // Sealed where it is kept: the prefix, the nonce, the text sealed
-        // in place after it, and the tag; one allocation.
-        let start = prefix.len() + NONCE_LEN;
-        let mut sealed = Vec::with_capacity(start + plaintext.len() + TAG_LEN);
-        sealed.extend_from_slice(prefix);
-        sealed.extend_from_slice(&nonce);
-        sealed.extend_from_slice(plaintext);
-        let tag = self
-            .cipher()?
-            .seal_in_place_separate_tag(
-                Nonce::assume_unique_for_key(nonce),
-                Aad::from(aad),
-                &mut sealed[start..],
-            )
-            .map_err(|_| SecretError::store("sealing failed"))?;
-        sealed.extend_from_slice(tag.as_ref());
+        let mut sealed = Vec::with_capacity(Self::sealed_length(prefix.len() + plaintext.len()));
+        self.seal_into(&mut sealed, prefix, aad, plaintext)?;
         Ok(sealed)
+    }
+
+    /// As [`DataKey::seal_after`], written after what `out` holds: the
+    /// prefix, the nonce, the text sealed in place after it, and the tag —
+    /// so a store sealing a batch of records seals them all into one
+    /// buffer, never one allocation a record (2026-11-20). Where sealing
+    /// fails, `out` holds what it held before.
+    ///
+    /// # Errors
+    ///
+    /// As [`DataKey::seal`].
+    pub fn seal_into(
+        &self,
+        out: &mut Vec<u8>,
+        prefix: &[u8],
+        aad: &[u8],
+        plaintext: &[u8],
+    ) -> Result<(), SecretError> {
+        let nonce: [u8; NONCE_LEN] = random::array();
+        let before = out.len();
+        out.extend_from_slice(prefix);
+        out.extend_from_slice(&nonce);
+        let start = out.len();
+        out.extend_from_slice(plaintext);
+        let sealed = self
+            .cipher()
+            .and_then(|cipher| {
+                cipher
+                    .seal_in_place_separate_tag(
+                        Nonce::assume_unique_for_key(nonce),
+                        Aad::from(aad),
+                        &mut out[start..],
+                    )
+                    .map_err(|_| SecretError::store("sealing failed"))
+            })
+            .inspect_err(|_| out.truncate(before))?;
+        out.extend_from_slice(sealed.as_ref());
+        Ok(())
+    }
+
+    /// How long `length` bytes — a prefix and the text — are once sealed:
+    /// with the nonce and the tag.
+    #[must_use]
+    pub const fn sealed_length(length: usize) -> usize {
+        length + NONCE_LEN + TAG_LEN
     }
 
     /// What [`DataKey::seal`] sealed with the same `aad`, authenticated.
@@ -236,6 +266,25 @@ mod tests {
             b"payload"
         );
         assert!(DataKey::taken(&[7; 31]).is_err(), "thirty-one bytes");
+    }
+
+    #[test]
+    fn values_sealed_into_one_buffer_each_open_where_they_lie() {
+        let key = DataKey::generate();
+        let mut out = b"kept".to_vec();
+        key.seal_into(&mut out, &[1], b"a", b"first")
+            .expect("sealed");
+        let between = out.len();
+        key.seal_into(&mut out, &[1], b"b", b"second")
+            .expect("sealed");
+        assert_eq!(&out[..4], b"kept", "what it held before, as it was");
+        let (first, second) = (&out[4..between], &out[between..]);
+        assert_eq!(first.len(), DataKey::sealed_length(1 + 5));
+        assert_eq!(first[0], 1, "the prefix first");
+        assert_eq!(key.open(b"a", &first[1..]).expect("opened"), b"first");
+        assert_eq!(key.open(b"b", &second[1..]).expect("opened"), b"second");
+        let alone = key.seal_after(&[1], b"a", b"first").expect("sealed");
+        assert_eq!(alone.capacity(), alone.len(), "one allocation, its length");
     }
 
     #[test]

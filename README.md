@@ -13,7 +13,10 @@ over a vault only or PKCS#11 only.
   open what the old one sealed.
 - **`DataKey`** — a 256-bit key, and the one place the estate seals data at
   rest: AES-256-GCM under a fresh random nonce with the value's place as
-  associated data (`seal`, `open`), HKDF-SHA-256 for a key per purpose
+  associated data (`seal`, `open`) — or after a prefix, into a buffer
+  that already holds others, a store's whole batch sealed into one
+  (`seal_after`, `seal_into`, `sealed_length`; 2026-11-20) —
+  HKDF-SHA-256 for a key per purpose
   (`derive`), keyed BLAKE3 for a name that can be looked up without saying
   what it names (`keyed_hash`; ADR-0063, amendment 2026-11-02). The cipher
   is set up from the key once, at its first use, and kept with it: a
